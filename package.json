@@ -1,0 +1,23 @@
+{
+  "name": "xenonite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Xenonite — unified memory + code engine service for amaze (talks to rocky LLM/embeddings)",
+  "bin": {
+    "xenonite": "src/server.mjs",
+    "xenonite-mcp": "src/mcp-stdio.mjs"
+  },
+  "scripts": {
+    "start": "node scripts/start-node22.mjs",
+    "start:raw": "node src/server.mjs",
+    "mcp": "node src/mcp-stdio.mjs",
+    "mcp:full": "XENONITE_MCP_TOOL_MODE=full node src/mcp-stdio.mjs"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "hono": "^4.6.0",
+    "jiti": "^2.7.0",
+    "smol-toml": "^1.6.1"
+  }
+}

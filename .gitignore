@@ -1,0 +1,9 @@
+node_modules/
+.harness/
+.subagent-outputs/
+.DS_Store
+*.log
+coverage/
+dist/
+.env
+.env.*
