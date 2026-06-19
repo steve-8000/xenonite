@@ -124,7 +124,6 @@ async fn code_index(State(state): State<AppState>, Json(request): Json<CodeReque
 }
 
 async fn code_search(State(state): State<AppState>, Json(request): Json<CodeRequest>) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_index::search(&state.config, request).await {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -132,7 +131,6 @@ async fn code_search(State(state): State<AppState>, Json(request): Json<CodeRequ
 }
 
 async fn code_status(State(state): State<AppState>, Json(request): Json<CodeRequest>) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_index::status(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -143,7 +141,6 @@ async fn code_status_get(
     State(state): State<AppState>,
     axum::extract::Query(request): axum::extract::Query<CodeRequest>,
 ) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_index::status(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -169,7 +166,19 @@ async fn code_stop(State(state): State<AppState>, Json(request): Json<CodeReques
 }
 
 async fn code_watch(State(state): State<AppState>, Json(request): Json<CodeRequest>) -> Response {
-    start_watcher(state, request).await
+    match request.action.as_deref().unwrap_or("start") {
+        "start" => start_watcher(state, request).await,
+        "stop" => stop_watcher(state, request).await,
+        "status" => watcher_status(state, request).await,
+        action => (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "ok": false,
+                "error": format!("unknown watch action: {action}")
+            })),
+        )
+            .into_response(),
+    }
 }
 
 async fn code_op(State(state): State<AppState>, Json(request): Json<CodeRequest>) -> Response {
@@ -178,6 +187,7 @@ async fn code_op(State(state): State<AppState>, Json(request): Json<CodeRequest>
     let nested_request = serde_json::from_value::<CodeRequest>(args).unwrap_or(CodeRequest {
         op: None,
         args: None,
+        action: request.action.clone(),
         project_path: request.project_path.clone(),
         query: request.query.clone(),
         limit: request.limit,
@@ -193,25 +203,6 @@ async fn code_op(State(state): State<AppState>, Json(request): Json<CodeRequest>
         agent_id: request.agent_id.clone(),
         agent_id_camel: request.agent_id_camel.clone(),
     });
-    if matches!(
-        op.as_str(),
-        "codebase_search"
-            | "codebase_status"
-            | "codebase_graph_build"
-            | "codebase_graph_query"
-            | "codebase_graph_stats"
-            | "codebase_graph_circular"
-            | "codebase_graph_visualize"
-            | "codebase_graph_status"
-            | "codebase_impact"
-            | "codebase_flow"
-            | "codebase_symbol"
-            | "codebase_symbols"
-    ) {
-        let _ =
-            ensure_watcher_for_project(state.clone(), nested_request.project_path.clone()).await;
-    }
-
     match op.as_str() {
         "codebase_index" => match code_index::index_project(&state.config, nested_request).await {
             Ok(response) => Json(response).into_response(),
@@ -228,7 +219,19 @@ async fn code_op(State(state): State<AppState>, Json(request): Json<CodeRequest>
             Err(error) => error_response(error),
         },
         "codebase_stop" => stop_watcher(state, nested_request).await,
-        "codebase_watch" => start_watcher(state, nested_request).await,
+        "codebase_watch" => match nested_request.action.as_deref().unwrap_or("start") {
+            "start" => start_watcher(state, nested_request).await,
+            "stop" => stop_watcher(state, nested_request).await,
+            "status" => watcher_status(state, nested_request).await,
+            action => (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "ok": false,
+                    "error": format!("unknown watch action: {action}")
+                })),
+            )
+                .into_response(),
+        },
         "codebase_search" => match code_index::search(&state.config, nested_request).await {
             Ok(response) => Json(response).into_response(),
             Err(error) => error_response(error),
@@ -337,6 +340,7 @@ async fn ensure_watcher_for_project(
                     CodeRequest {
                         op: None,
                         args: None,
+                        action: None,
                         project_path: Some(project_path_for_task.clone()),
                         query: None,
                         limit: None,
@@ -378,6 +382,27 @@ async fn stop_watcher(state: AppState, request: CodeRequest) -> Response {
             "Rust watcher stopped for this project.".to_string()
         } else {
             "No Rust watcher was active for this project.".to_string()
+        },
+    })
+    .into_response()
+}
+
+async fn watcher_status(state: AppState, request: CodeRequest) -> Response {
+    let project_path = match code_index::resolve_project_path(request.project_path.clone()) {
+        Ok(path) => path,
+        Err(error) => return error_response(error),
+    };
+    let project_key = project_path.display().to_string();
+    let active = state.watchers.lock().await.contains(&project_key);
+
+    Json(code_index::ControlResponse {
+        ok: true,
+        project_path: project_key,
+        status: if active { "active" } else { "idle" }.to_string(),
+        message: if active {
+            "Rust watcher is active for this project.".to_string()
+        } else {
+            "No Rust watcher is active for this project.".to_string()
         },
     })
     .into_response()
@@ -477,7 +502,6 @@ fn graph_op<T: Serialize>(
 }
 
 async fn graph_build(State(state): State<AppState>, Json(request): Json<GraphRequest>) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::build(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -485,7 +509,6 @@ async fn graph_build(State(state): State<AppState>, Json(request): Json<GraphReq
 }
 
 async fn graph_query(State(state): State<AppState>, Json(request): Json<GraphRequest>) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::query(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -493,7 +516,6 @@ async fn graph_query(State(state): State<AppState>, Json(request): Json<GraphReq
 }
 
 async fn graph_stats(State(state): State<AppState>, Json(request): Json<GraphRequest>) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::stats(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -504,7 +526,6 @@ async fn graph_status(
     State(state): State<AppState>,
     Json(request): Json<GraphRequest>,
 ) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::status(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -515,7 +536,6 @@ async fn graph_circular(
     State(state): State<AppState>,
     Json(request): Json<GraphRequest>,
 ) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::circular(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -526,7 +546,6 @@ async fn graph_visualize(
     State(state): State<AppState>,
     Json(request): Json<GraphRequest>,
 ) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::visualize(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -547,7 +566,6 @@ async fn graph_symbol(
     State(state): State<AppState>,
     Json(request): Json<GraphRequest>,
 ) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::symbol(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -558,7 +576,6 @@ async fn graph_impact(
     State(state): State<AppState>,
     Json(request): Json<GraphRequest>,
 ) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::impact(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -566,7 +583,6 @@ async fn graph_impact(
 }
 
 async fn graph_flow(State(state): State<AppState>, Json(request): Json<GraphRequest>) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::flow(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),
@@ -577,7 +593,6 @@ async fn graph_symbols(
     State(state): State<AppState>,
     Json(request): Json<GraphRequest>,
 ) -> Response {
-    let _ = ensure_watcher_for_project(state.clone(), request.project_path.clone()).await;
     match code_graph::symbols(&state.config, request) {
         Ok(response) => Json(response).into_response(),
         Err(error) => error_response(error),

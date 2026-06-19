@@ -17,6 +17,7 @@ use crate::{
 
 const CHUNK_SIZE: usize = 100;
 const CHUNK_OVERLAP: usize = 10;
+const EMBEDDING_BATCH_SIZE: usize = 8;
 const MAX_FILE_BYTES: u64 = 1_000_000;
 const SEARCH_DEFAULT_LIMIT: usize = 10;
 const SEARCH_MAX_LIMIT: usize = 50;
@@ -71,6 +72,7 @@ const SUPPORTED_EXTENSIONS: &[&str] = &[
 pub struct CodeRequest {
     pub op: Option<String>,
     pub args: Option<serde_json::Value>,
+    pub action: Option<String>,
     #[serde(rename = "projectPath")]
     pub project_path: Option<String>,
     pub query: Option<String>,
@@ -661,12 +663,22 @@ async fn attach_embeddings(config: &Config, files: &mut [IndexedFile]) {
     if texts.is_empty() {
         return;
     }
-    let Ok(vectors) = rocky::embed(&config.rocky, &texts).await else {
-        return;
-    };
-    let mut vectors = vectors.into_iter();
+    let mut embeddings = Vec::with_capacity(texts.len());
+    for batch in texts.chunks(EMBEDDING_BATCH_SIZE) {
+        match rocky::embed(&config.rocky, batch).await {
+            Ok(vectors) => {
+                let received = vectors.len();
+                embeddings.extend(vectors.into_iter().map(Some));
+                if received < batch.len() {
+                    embeddings.extend((0..batch.len() - received).map(|_| None));
+                }
+            }
+            Err(_) => embeddings.extend((0..batch.len()).map(|_| None)),
+        }
+    }
+    let mut embeddings = embeddings.into_iter();
     for chunk in files.iter_mut().flat_map(|file| file.chunks.iter_mut()) {
-        chunk.embedding = vectors.next();
+        chunk.embedding = embeddings.next().flatten();
     }
 }
 
