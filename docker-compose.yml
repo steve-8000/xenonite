@@ -1,0 +1,21 @@
+services:
+  xenonite:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xenonite
+    ports:
+      - "${XENONITE_PORT:-8700}:8700"
+    environment:
+      XENONITE_PORT: "8700"
+      XENONITE_DATA_DIR: /var/lib/xenonite
+      XENONITE_HOST_ROOT: /host
+      ROCKY_LLM_URL: "${ROCKY_LLM_URL:-http://host.docker.internal:7777/v1}"
+      ROCKY_EMBED_URL: "${ROCKY_EMBED_URL:-http://host.docker.internal:7778/v1}"
+    volumes:
+      - /:/host
+      - xenonite_data:/var/lib/xenonite
+    restart: unless-stopped
+
+volumes:
+  xenonite_data:

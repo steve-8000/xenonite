@@ -1,0 +1,6 @@
+target
+rust/target
+.git
+node_modules
+engine
+*.log

@@ -1,7 +1,10 @@
 node_modules/
+target/
+rust/target/
 .harness/
 .subagent-outputs/
 .DS_Store
+core
 *.log
 coverage/
 dist/
